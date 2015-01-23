@@ -61,7 +61,6 @@ import Database.MongoDB.Query (Action
                               , master
                               , slaveOk
                               , accessMode
-                              , MonadDB(..)
                               , Database
                               , allDatabases
                               , useDb
@@ -70,13 +69,12 @@ import Database.MongoDB.Query (Action
                               , Password
                               , auth)
 import Database.MongoDB.Structured.Types
-import Database.MongoDB.Internal.Util
 import Data.Bson
+import qualified Data.Text as T
 import Data.Maybe (fromJust)
 import Data.List (sortBy, groupBy)
 import Data.Functor
 import Data.Word
-import Data.CompactString.UTF8 (intercalate)
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Control
@@ -89,45 +87,46 @@ import Control.Monad.Base
 
 -- | Inserts document to its corresponding collection and return
 -- the \"_id\" value.
-insert :: (MonadIO' m, Structured a) => a -> Action m Value
+insert :: (MonadIO m, Structured a) => a -> Action m Value
 insert x = M.insert (collection x) (toBSON x)
 
 -- | Same as 'insert' but discarding result.
-insert_ :: (MonadIO' m, Structured a) => a -> Action m ()
+insert_ :: (MonadIO m, Structured a) => a -> Action m ()
 insert_ x = insert x >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values.
-insertMany :: (MonadIO' m, Structured a) => [a] -> Action m [Value]
+insertMany :: (MonadIO m, Structured a) => [a] -> Action m [Value]
 insertMany = insertManyOrAll (M.insertMany)
 
 -- | Same as 'insertMany' but discarding result.
-insertMany_ :: (MonadIO' m, Structured a) => [a] -> Action m ()
+insertMany_ :: (MonadIO m, Structured a) => [a] -> Action m ()
 insertMany_ ss = insertMany ss >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values. Unlike 'insertMany', this function keeps
 -- inserting remaining documents even if an error occurs.
-insertAll :: (MonadIO' m, Structured a) => [a] -> Action m [Value]
+insertAll :: (MonadIO m, Structured a) => [a] -> Action m [Value]
 insertAll = insertManyOrAll (M.insertAll)
 
 -- | Same as 'insertAll' but discarding result.
-insertAll_ :: (MonadIO' m, Structured a) => [a] -> Action m ()
+insertAll_ :: (MonadIO m, Structured a) => [a] -> Action m ()
 insertAll_ ss = insertAll ss >> return ()
 
 -- | Helper function that carries out the hard work for 'insertMany'
 -- and 'insertAll'.
-insertManyOrAll :: (MonadIO' m, Structured a) =>
+insertManyOrAll :: (MonadIO m, Structured a) =>
    (M.Collection -> [Document] -> Action m [Value]) -> [a] -> Action m [Value]
 insertManyOrAll insertFunc ss = do
   let docs  = map (\x -> (collection x, toBSON x)) ss
       gdocs = (groupBy (\(a,_) (b,_) -> a == b))
               . (sortBy (\(a,_) (b,_) -> compare a b)) $ docs
-  concat <$> (forM gdocs $ \ds ->
+  rdocs <- (forM gdocs $ \ds ->
                 if (null ds)
                   then return []
                   else insertFunc (fst . head $ ds) (map snd ds)
              )
+  return $ concat rdocs
 
 --
 -- Update
@@ -135,7 +134,7 @@ insertManyOrAll insertFunc ss = do
 
 -- | Save document to collection. If the 'SObjId' field is set then
 -- the document is updated, otherwise we perform an insert.
-save :: (MonadIO' m, Structured a) => a -> Action m ()
+save :: (MonadIO m, Structured a) => a -> Action m ()
 save x = M.save (collection x) (toBSON x)
 
 
@@ -175,7 +174,7 @@ fetch :: (MonadIO m, Functor m, Structured a)
 fetch q = (fromJust . fromBSON) <$> (M.fetch . unStructuredQuery $ q)
 
 -- | Count number of documents satisfying query.
-count :: (MonadIO' m) => StructuredQuery -> Action m Int
+count :: (MonadIO m) => StructuredQuery -> Action m Int
 count = M.count . unStructuredQuery
 
 
@@ -281,7 +280,7 @@ data Nested f f' = Nested Label
 
 -- | Combining two field names to create a 'Nested' type.
 (.!) :: (Selectable r f t, Selectable t f' t') => f -> f' -> Nested f f'
-(.!) f f' = Nested $ intercalate (u ".") [(s f undefined), (s f' undefined)]
+(.!) f f' = Nested $ T.intercalate (T.pack ".") [(s f undefined), (s f' undefined)]
 
 instance (Selectable r f t, Selectable t f' t') =>
           Selectable r (Nested f f') t' where
@@ -290,7 +289,7 @@ instance (Selectable r f t, Selectable t f' t') =>
 -- | A query expression.
 data QueryExp a = StarExp
                 | EqExp   !Label   !Value
-                | LBinExp !UString !Label !Value
+                | LBinExp !Label !Label !Value
                 | AndExp  (QueryExp a) (QueryExp a) 
                 | OrExp   (QueryExp a) (QueryExp a) 
                 | NotExp  (QueryExp a)
@@ -311,23 +310,23 @@ infixr  2 .||
 
 -- | Combinator for @$ne@
 (./=) :: (Val t, Selectable a f t) => f -> t -> QueryExp a
-(./=) f v = LBinExp (u "$ne") (s f v) (val v)
+(./=) f v = LBinExp (T.pack "$ne") (s f v) (val v)
 
 -- | Combinator for @<@
 (.< ) :: (Val t, Selectable a f t) => f -> t -> QueryExp a
-(.< ) f v = LBinExp (u "$lt") (s f v) (val v)
+(.< ) f v = LBinExp (T.pack "$lt") (s f v) (val v)
 
 -- | Combinator for @<=@
 (.<=) :: (Val t, Selectable a f t) => f -> t -> QueryExp a
-(.<=) f v = LBinExp (u "$lte") (s f v) (val v)
+(.<=) f v = LBinExp (T.pack "$lte") (s f v) (val v)
 
 -- | Combinator for @>@
 (.> ) :: (Val t, Selectable a f t) => f -> t -> QueryExp a
-(.> ) f v = LBinExp (u "$gt") (s f v) (val v)
+(.> ) f v = LBinExp (T.pack "$gt") (s f v) (val v)
 
 -- | Combinator for @>=@
 (.>=) :: (Val t, Selectable a f t) => f -> t -> QueryExp a
-(.>=) f v = LBinExp (u "$gte") (s f v) (val v)
+(.>=) f v = LBinExp (T.pack "$gte") (s f v) (val v)
 
 -- | Combinator for @$and@
 (.&&) :: QueryExp a -> QueryExp a -> QueryExp a
@@ -346,11 +345,11 @@ expToSelector :: Structured a => QueryExp a -> M.Selector
 expToSelector (StarExp)        = [ ]
 expToSelector (EqExp l v)      = [ l := v ]
 expToSelector (LBinExp op l v) = [ l =: [ op := v ]]
-expToSelector (AndExp e1 e2)   = [ (u "$and") =: [expToSelector e1
+expToSelector (AndExp e1 e2)   = [ (T.pack "$and") =: [expToSelector e1
                                                  , expToSelector e2] ]
-expToSelector (OrExp e1 e2)    = [ (u "$or") =: [expToSelector e1
+expToSelector (OrExp e1 e2)    = [ (T.pack "$or") =: [expToSelector e1
                                                 , expToSelector e2] ]
-expToSelector (NotExp e)       = [ (u "$not") =: expToSelector e]
+expToSelector (NotExp e)       = [ (T.pack "$not") =: expToSelector e]
 
 -- | Convert query expression to 'Selection'.
 expToSelection :: Structured a => QueryExp a -> M.Selection

@@ -54,6 +54,7 @@ import Language.Haskell.TH.Syntax
 import Data.Char (toUpper)
 import Data.Bson
 import qualified Data.Bson as BSON
+import qualified Data.Text as T
 import Data.Functor ((<$>))
 import Data.List (isPrefixOf)
 
@@ -97,14 +98,14 @@ deriveStructured t = do
             r <- reify t1
             case r of
               TyConI (DataD _ _ _ (RecC _ _:[]) _) -> return ()
-              _ -> report True "Unsupported type. Can only derive for\
+              _ -> reportError "Unsupported type. Can only derive for\
                                \ single-constructor record types."
             return r
           lookForSObjId = filter f
             where f (_,_,(ConT n)) = (n == ''SObjId)
                   f _ = False
           guardSObjId ids = if length ids /= 1
-                              then report True "Expecting 1 SObjId field."
+                              then reportError "Expecting 1 SObjId field."
                               else return ()
           first (a,_,_) = a
 
@@ -141,8 +142,8 @@ funD_toBSON toBSONName fieldNames sObjName = do
                 i = nameBase sObjName
                 v = appE (varE f) x
              in if l /= i
-                  then [| ((u l) := val $v) : $(gen_toBSON x fs) |]
-                  else [| let y  = ((u "_id") := val (unSObjId $v))
+                  then [| ((T.pack l) := val $v) : $(gen_toBSON x fs) |]
+                  else [| let y  = ((T.pack "_id") := val (unSObjId $v))
                               ys = $(gen_toBSON x fs)
                           in if isNoSObjId $v
                                then ys
@@ -155,7 +156,7 @@ funD_collection :: Name    -- ^ collection Name
                 -> Q Dec   -- ^ collection delclaration
 funD_collection collectionName conName = do
   let n = nameBase conName
-  d <- [d| collectionName _ = (u n) |]
+  d <- [d| collectionName _ = (T.pack n) |]
   let [FunD _ cs] = d
   return (FunD collectionName cs)
 
@@ -198,7 +199,7 @@ lookup_m = BSON.lookup
 
 -- | Lookup _id. If not found, do not fail. Rather return 'noSObjId'.
 lookup_id :: Document -> Maybe SObjId
-lookup_id d = Just (SObjId (lookup_m (u "_id") d :: Maybe ObjectId))
+lookup_id d = Just (SObjId (lookup_m (T.pack "_id") d :: Maybe ObjectId))
 
 
 gen_fromBSON :: Name            -- ^ Constructor name
@@ -217,7 +218,7 @@ gen_fromBSON conName (l:ls) doc vals sObjName =
   in if lbl == (nameBase sObjName)
       then [| lookup_id $doc >>= \v ->
               $(gen_fromBSON conName ls doc ((l,'v):vals) sObjName) |]
-      else [| lookup_m (u lbl) $doc >>= \v ->
+      else [| lookup_m (T.pack lbl) $doc >>= \v ->
               $(gen_fromBSON conName ls doc ((l,'v):vals) sObjName) |]
 
 -- | Given name of type, generate instance for BSON's @Val@ class.
@@ -273,7 +274,7 @@ genSelectable' conName (n,_,t) = do
   [InstanceD selCtx (AppT (AppT (AppT selT _) _) _)
                     [FunD _ [Clause pats (NormalB (AppE varE_u _)) []]]]
      <-  [d| instance Selectable T1 T2 T3 where
-               s _ _ = (u "")
+               s _ _ = (T.pack "")
          |]
   let lit = LitE .  StringL $ if is_id t then "_id" else nameBase n
       selInstance = 
