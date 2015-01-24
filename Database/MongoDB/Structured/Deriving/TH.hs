@@ -288,7 +288,8 @@ genSelectable' conName (n,_,t) = do
   return [dataType, selInstance]
     where cap (c:cs) = toUpper c : cs
           cap x = x
-          is_id (ConT c) = (c == ''SObjId)
-          is_id _        = error "Invalid usage of is_id_, expecting ConT"
+          is_id (ConT c)   = (c == ''SObjId)
+          is_id (AppT _ _) = False
+          is_id a          = error "Invalid usage of is_id_, expecting ConT or AppT"
 
 
