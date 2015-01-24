@@ -38,7 +38,7 @@ module Database.MongoDB.Structured.Query (
                                          , StructuredSelect(select)
                                          , Selectable(..)
                                          , (.!)
-                                         , QueryExp
+                                         , QueryExp(..)
                                          , (.*)
                                          , (.==), (./=), (.<), (.<=), (.>), (.>=)
                                          , (.&&), (.||), not_
