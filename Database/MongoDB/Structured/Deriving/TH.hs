@@ -68,8 +68,8 @@ deriveStructured :: Name -> Q [Dec]
 deriveStructured t = do
   let className      = ''Structured
   let collectionName = 'collection
-  let toBSONName     = 'toBSON
-  let fromBSONName   = 'fromBSON
+  -- let toBSONName     = 'toBSON
+  -- let fromBSONName   = 'fromBSON
 
   -- Get record fields:
   TyConI (DataD _ _ _ (RecC conName fields:[]) _) <- getFields t
@@ -80,20 +80,21 @@ deriveStructured t = do
   let sObjName = (first . head) sObjIds
 
   collectionFunD <- funD_collection collectionName conName
-  toBSONFunD     <- funD_toBSON toBSONName fieldNames sObjName
-  fromBSONFunD   <- funD_fromBSON fromBSONName conName fieldNames sObjName
+  -- toBSONFunD     <- funD_toBSON toBSONName fieldNames sObjName
+  -- fromBSONFunD   <- funD_fromBSON fromBSONName conName fieldNames sObjName
   
   selTypesAndInst <- genSelectable t fields
 
   -- Generate Structured instance:
   let structuredInst = InstanceD [] (AppT (ConT className) (ConT t)) 
                          [ collectionFunD
-                         , toBSONFunD
-                         , fromBSONFunD ]
+                         -- , toBSONFunD
+                         -- , fromBSONFunD
+                         ]
   -- Generate Val instance:
-  valInst <- gen_ValInstance t
+  -- valInst <- gen_ValInstance t
 
-  return $ [structuredInst, valInst] ++ selTypesAndInst
+  return $ [structuredInst {-, valInst -}] ++ selTypesAndInst
     where getFields t1 = do
             r <- reify t1
             case r of
@@ -222,6 +223,7 @@ gen_fromBSON conName (l:ls) doc vals sObjName =
               $(gen_fromBSON conName ls doc ((l,'v):vals) sObjName) |]
 
 -- | Given name of type, generate instance for BSON's @Val@ class.
+{-
 gen_ValInstance :: Name -> Q Dec
 gen_ValInstance t = do
   let valE = varE 'val
@@ -237,6 +239,7 @@ gen_ValInstance t = do
     where fixNames aN (FunD n cs) | (nameBase aN)
                                       `isPrefixOf` (nameBase n) = FunD aN cs
           fixNames _  x = x 
+-}
 
 -- | Given name of type, and fields, generate new type corrsponding to
 -- each field and make them instances of @Selectable@.
