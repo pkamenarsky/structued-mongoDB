@@ -143,11 +143,11 @@ save x = M.save (collection x) (toBSON x)
 --
 
 -- | Delete all documents that match the selection/query.
-delete :: MonadIO m => StructuredSelection -> Action m ()
+delete :: MonadIO m => StructuredSelection a -> Action m ()
 delete = M.delete . unStructuredSelection 
 
 -- | Delete the first documents that match the selection/query.
-deleteOne :: MonadIO m => StructuredSelection -> Action m ()
+deleteOne :: MonadIO m => StructuredSelection a -> Action m ()
 deleteOne = M.deleteOne . unStructuredSelection 
 
 
@@ -157,12 +157,12 @@ deleteOne = M.deleteOne . unStructuredSelection
 
 -- | Find documents satisfying query
 find :: (Functor m, MonadIO m, MonadBaseControl IO m)
-     => StructuredQuery -> Action m StructuredCursor
+     => StructuredQuery a -> Action m (StructuredCursor a)
 find q = StructuredCursor <$> (M.find . unStructuredQuery $ q)
 
 -- | Find documents satisfying query
 findOne :: (MonadIO m, Structured a)
-     => StructuredQuery -> Action m (Maybe a)
+     => StructuredQuery a -> Action m (Maybe a)
 findOne q = do 
   res <- M.findOne . unStructuredQuery $ q
   return $ res >>= fromBSON
@@ -170,11 +170,11 @@ findOne q = do
 -- | Same as 'findOne' but throws 'DocNotFound' if none match. Error
 -- is thrown if the document cannot e transformed.
 fetch :: (MonadIO m, Functor m, Structured a)
-     => StructuredQuery -> Action m a
+     => StructuredQuery a -> Action m a
 fetch q = (fromJust . fromBSON) <$> (M.fetch . unStructuredQuery $ q)
 
 -- | Count number of documents satisfying query.
-count :: (MonadIO m) => StructuredQuery -> Action m Int
+count :: (MonadIO m) => StructuredQuery a -> Action m Int
 count = M.count . unStructuredQuery
 
 
@@ -183,17 +183,17 @@ count = M.count . unStructuredQuery
 --
 
 -- | Wrapper for @mongoDB@'s @Cursor@.
-newtype StructuredCursor = StructuredCursor { unStructuredCursor :: M.Cursor }
+newtype StructuredCursor a = StructuredCursor { unStructuredCursor :: M.Cursor }
 
 -- | Return next batch of structured documents.
 nextBatch :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
-          => StructuredCursor -> Action m [Maybe a]
+          => StructuredCursor a -> Action m [Maybe a]
 nextBatch c = (map fromBSON) <$> M.nextBatch (unStructuredCursor c)
 
 -- | Return next structured document. If failed return 'Left',
 -- otherwise 'Right' of the deserialized result.
 next :: (Structured a, MonadIO m, MonadBaseControl IO m)
-     => StructuredCursor -> Action m (Either () (Maybe a))
+     => StructuredCursor a -> Action m (Either () (Maybe a))
 next c = do
     res <- M.next (unStructuredCursor c)
     case res of
@@ -202,21 +202,21 @@ next c = do
 
 -- | Return up to next @N@ documents.
 nextN :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
-      => Int -> StructuredCursor -> Action m [Maybe a]
+      => Int -> StructuredCursor a -> Action m [Maybe a]
 nextN n c = (map fromBSON) <$> M.nextN n (unStructuredCursor c)
 
 
 -- | Return the remaining documents in query result.
 rest :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m) 
-     => StructuredCursor -> Action m [Maybe a]
+     => StructuredCursor a -> Action m [Maybe a]
 rest c = (map fromBSON) <$> M.rest (unStructuredCursor c)
 
 -- | Close the cursor.
-closeCursor :: (MonadIO m, MonadBaseControl IO m) => StructuredCursor -> Action m ()
+closeCursor :: (MonadIO m, MonadBaseControl IO m) => StructuredCursor a -> Action m ()
 closeCursor = M.closeCursor . unStructuredCursor
 
 -- | Check if the cursor is closed.
-isCursorClosed :: (MonadIO m, MonadBase IO m) => StructuredCursor -> Action m Bool
+isCursorClosed :: (MonadIO m, MonadBase IO m) => StructuredCursor a -> Action m Bool
 isCursorClosed = M.isCursorClosed . unStructuredCursor
 
 
@@ -226,13 +226,13 @@ isCursorClosed = M.isCursorClosed . unStructuredCursor
 --
 
 -- | Wrapper for @mongoDB@'s @Selection@ type.
-newtype StructuredSelection =
+newtype StructuredSelection a =
   StructuredSelection { unStructuredSelection :: M.Selection }
   deriving(Eq, Show)
 
 -- | Wrapper for @mongoDB@'s @Query@ type.
-data StructuredQuery = StructuredQuery
-                        { selection :: StructuredSelection
+data StructuredQuery a = StructuredQuery
+                        { selection :: StructuredSelection a
                         -- ^ Actual query.
                         , skip      :: Word32 
                         -- ^ Number of matching objects to skip
@@ -249,7 +249,7 @@ data StructuredQuery = StructuredQuery
 -- | Analog to @mongoDB@'s @Select@ class
 class StructuredSelect aQorS where
   -- | Create a selection or query from an expression
-  select :: Structured a => QueryExp a -> aQorS
+  select :: Structured a => QueryExp a -> aQorS a
 
 instance StructuredSelect StructuredSelection where
   select = StructuredSelection . expToSelection
@@ -258,7 +258,7 @@ instance StructuredSelect StructuredQuery where
   select x = StructuredQuery (StructuredSelection $ expToSelection x)
                               0 0 ([])
 
-unStructuredQuery :: StructuredQuery -> M.Query
+unStructuredQuery :: StructuredQuery a -> M.Query
 unStructuredQuery sq = M.Query [] -- options
                                (unStructuredSelection $ selection sq)
                                [] -- project
