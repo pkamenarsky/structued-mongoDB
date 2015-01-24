@@ -23,8 +23,8 @@ import Data.Typeable
 -- and BSON document.
 class Structured a where
   collection :: a -> Collection     -- ^ Collection name is then name of type
-  -- toBSON     :: a -> Document       -- ^ Convert record to a BSON object
-  -- fromBSON   :: Document -> Maybe a -- ^ Convert BSON object to record
+  toBSON     :: a -> Document       -- ^ Convert record to a BSON object
+  fromBSON   :: Document -> Maybe a -- ^ Convert BSON object to record
 
 -- | Type corresponding to the \"_id\" field of a document in a
 -- structured object.

@@ -80,13 +80,6 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Control
 import Control.Monad.Base
 
-docVal :: Val a => a -> Document
-docVal x = case val x of
-  Doc doc -> doc
-  _       -> error "docVal: expected document"
-
-docCast :: Val a => Document -> Maybe a
-docCast = cast' . Doc
 
 --
 -- Insert
@@ -94,38 +87,38 @@ docCast = cast' . Doc
 
 -- | Inserts document to its corresponding collection and return
 -- the \"_id\" value.
-insert :: (MonadIO m, Structured a, Val a) => a -> Action m Value
-insert x = M.insert (collection x) (docVal x)
+insert :: (MonadIO m, Structured a) => a -> Action m Value
+insert x = M.insert (collection x) (toBSON x)
 
 -- | Same as 'insert' but discarding result.
-insert_ :: (MonadIO m, Structured a, Val a) => a -> Action m ()
+insert_ :: (MonadIO m, Structured a) => a -> Action m ()
 insert_ x = insert x >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values.
-insertMany :: (MonadIO m, Structured a, Val a) => [a] -> Action m [Value]
+insertMany :: (MonadIO m, Structured a) => [a] -> Action m [Value]
 insertMany = insertManyOrAll (M.insertMany)
 
 -- | Same as 'insertMany' but discarding result.
-insertMany_ :: (MonadIO m, Structured a, Val a) => [a] -> Action m ()
+insertMany_ :: (MonadIO m, Structured a) => [a] -> Action m ()
 insertMany_ ss = insertMany ss >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values. Unlike 'insertMany', this function keeps
 -- inserting remaining documents even if an error occurs.
-insertAll :: (MonadIO m, Structured a, Val a) => [a] -> Action m [Value]
+insertAll :: (MonadIO m, Structured a) => [a] -> Action m [Value]
 insertAll = insertManyOrAll (M.insertAll)
 
 -- | Same as 'insertAll' but discarding result.
-insertAll_ :: (MonadIO m, Structured a, Val a) => [a] -> Action m ()
+insertAll_ :: (MonadIO m, Structured a) => [a] -> Action m ()
 insertAll_ ss = insertAll ss >> return ()
 
 -- | Helper function that carries out the hard work for 'insertMany'
 -- and 'insertAll'.
-insertManyOrAll :: (MonadIO m, Structured a, Val a) =>
+insertManyOrAll :: (MonadIO m, Structured a) =>
    (M.Collection -> [Document] -> Action m [Value]) -> [a] -> Action m [Value]
 insertManyOrAll insertFunc ss = do
-  let docs  = map (\x -> (collection x, docVal x)) ss
+  let docs  = map (\x -> (collection x, toBSON x)) ss
       gdocs = (groupBy (\(a,_) (b,_) -> a == b))
               . (sortBy (\(a,_) (b,_) -> compare a b)) $ docs
   rdocs <- (forM gdocs $ \ds ->
@@ -141,8 +134,8 @@ insertManyOrAll insertFunc ss = do
 
 -- | Save document to collection. If the 'SObjId' field is set then
 -- the document is updated, otherwise we perform an insert.
-save :: (MonadIO m, Structured a, Val a) => a -> Action m ()
-save x = M.save (collection x) (docVal x)
+save :: (MonadIO m, Structured a) => a -> Action m ()
+save x = M.save (collection x) (toBSON x)
 
 
 --
@@ -168,17 +161,17 @@ find :: (Functor m, MonadIO m, MonadBaseControl IO m)
 find q = StructuredCursor <$> (M.find . unStructuredQuery $ q)
 
 -- | Find documents satisfying query
-findOne :: (MonadIO m, Structured a, Val a)
+findOne :: (MonadIO m, Structured a)
      => StructuredQuery -> Action m (Maybe a)
 findOne q = do 
   res <- M.findOne . unStructuredQuery $ q
-  return $ res >>= docCast
+  return $ res >>= fromBSON
 
 -- | Same as 'findOne' but throws 'DocNotFound' if none match. Error
 -- is thrown if the document cannot e transformed.
-fetch :: (MonadIO m, Functor m, Structured a, Val a)
+fetch :: (MonadIO m, Functor m, Structured a)
      => StructuredQuery -> Action m a
-fetch q = (fromJust . docCast) <$> (M.fetch . unStructuredQuery $ q)
+fetch q = (fromJust . fromBSON) <$> (M.fetch . unStructuredQuery $ q)
 
 -- | Count number of documents satisfying query.
 count :: (MonadIO m) => StructuredQuery -> Action m Int
@@ -193,30 +186,30 @@ count = M.count . unStructuredQuery
 newtype StructuredCursor = StructuredCursor { unStructuredCursor :: M.Cursor }
 
 -- | Return next batch of structured documents.
-nextBatch :: (Structured a, Val a, Functor m, MonadIO m, MonadBaseControl IO m)
+nextBatch :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
           => StructuredCursor -> Action m [Maybe a]
-nextBatch c = (map docCast) <$> M.nextBatch (unStructuredCursor c)
+nextBatch c = (map fromBSON) <$> M.nextBatch (unStructuredCursor c)
 
 -- | Return next structured document. If failed return 'Left',
 -- otherwise 'Right' of the deserialized result.
-next :: (Structured a, Val a, MonadIO m, MonadBaseControl IO m)
+next :: (Structured a, MonadIO m, MonadBaseControl IO m)
      => StructuredCursor -> Action m (Either () (Maybe a))
 next c = do
     res <- M.next (unStructuredCursor c)
     case res of
       Nothing -> return (Left ())
-      Just r  -> return (Right $ docCast r)
+      Just r  -> return (Right $ fromBSON r)
 
 -- | Return up to next @N@ documents.
-nextN :: (Structured a, Val a, Functor m, MonadIO m, MonadBaseControl IO m)
+nextN :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
       => Int -> StructuredCursor -> Action m [Maybe a]
-nextN n c = (map docCast) <$> M.nextN n (unStructuredCursor c)
+nextN n c = (map fromBSON) <$> M.nextN n (unStructuredCursor c)
 
 
 -- | Return the remaining documents in query result.
-rest :: (Structured a, Val a, Functor m, MonadIO m, MonadBaseControl IO m) 
+rest :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m) 
      => StructuredCursor -> Action m [Maybe a]
-rest c = (map docCast) <$> M.rest (unStructuredCursor c)
+rest c = (map fromBSON) <$> M.rest (unStructuredCursor c)
 
 -- | Close the cursor.
 closeCursor :: (MonadIO m, MonadBaseControl IO m) => StructuredCursor -> Action m ()
