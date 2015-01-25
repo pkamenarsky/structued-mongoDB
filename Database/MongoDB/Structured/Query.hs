@@ -45,7 +45,9 @@ module Database.MongoDB.Structured.Query (
                                          -- * Cursor
                                          , StructuredCursor
                                          , closeCursor, isCursorClosed
-                                         , nextBatch, next, nextN, rest
+                                         , next, nextBatch, nextBatch'
+                                         , nextN, nextN'
+                                         , rest, rest'
                                          -- * Rexports
                                          , module Database.MongoDB.Query
                                          , Value
@@ -71,7 +73,7 @@ import Database.MongoDB.Query (Action
 import Database.MongoDB.Structured.Types
 import Data.Bson
 import qualified Data.Text as T
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, catMaybes)
 import Data.List (sortBy, groupBy)
 import Data.Functor
 import Data.Word
@@ -190,6 +192,11 @@ nextBatch :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
           => StructuredCursor a -> Action m [Maybe a]
 nextBatch c = (map fromBSON) <$> M.nextBatch (unStructuredCursor c)
 
+-- | Return next batch of structured documents.
+nextBatch' :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
+          => StructuredCursor a -> Action m [a]
+nextBatch' c = catMaybes <$> (map fromBSON) <$> M.nextBatch (unStructuredCursor c)
+
 -- | Return next structured document. If failed return 'Left',
 -- otherwise 'Right' of the deserialized result.
 next :: (Structured a, MonadIO m, MonadBaseControl IO m)
@@ -205,11 +212,21 @@ nextN :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
       => Int -> StructuredCursor a -> Action m [Maybe a]
 nextN n c = (map fromBSON) <$> M.nextN n (unStructuredCursor c)
 
+-- | Return up to next @N@ valid documents.
+nextN' :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
+      => Int -> StructuredCursor a -> Action m [a]
+nextN' n c = catMaybes <$> (map fromBSON) <$> M.nextN n (unStructuredCursor c)
+
 
 -- | Return the remaining documents in query result.
 rest :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m) 
      => StructuredCursor a -> Action m [Maybe a]
 rest c = (map fromBSON) <$> M.rest (unStructuredCursor c)
+
+-- | Return the remaining valid documents in query result.
+rest' :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m) 
+     => StructuredCursor a -> Action m [a]
+rest' c = catMaybes <$> (map fromBSON) <$> M.rest (unStructuredCursor c)
 
 -- | Close the cursor.
 closeCursor :: (MonadIO m, MonadBaseControl IO m) => StructuredCursor a -> Action m ()
