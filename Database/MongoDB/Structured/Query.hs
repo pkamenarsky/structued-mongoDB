@@ -73,7 +73,7 @@ import Database.MongoDB.Query (Action
 import Database.MongoDB.Structured.Types
 import Data.Bson
 import qualified Data.Text as T
-import Data.Maybe (fromJust, catMaybes)
+import Data.Maybe (fromJust, catMaybes, mapMaybe)
 import Data.List (sortBy, groupBy)
 import Data.Functor
 import Data.Word
@@ -87,10 +87,14 @@ import Control.Monad.Base
 -- Insert
 --
 
+valueToObjId :: Value -> Maybe ObjectId
+valueToObjId (ObjId oid) = Just oid
+valueToObjId _           = Nothing
+
 -- | Inserts document to its corresponding collection and return
 -- the \"_id\" value.
-insert :: (MonadIO m, Structured a) => a -> Action m Value
-insert x = M.insert (collection x) (toBSON x)
+insert :: (MonadIO m, Structured a) => a -> Action m (Maybe ObjectId)
+insert x = liftM valueToObjId $ M.insert (collection x) (toBSON x)
 
 -- | Same as 'insert' but discarding result.
 insert_ :: (MonadIO m, Structured a) => a -> Action m ()
@@ -98,7 +102,7 @@ insert_ x = insert x >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values.
-insertMany :: (MonadIO m, Structured a) => [a] -> Action m [Value]
+insertMany :: (MonadIO m, Structured a) => [a] -> Action m [ObjectId]
 insertMany = insertManyOrAll (M.insertMany)
 
 -- | Same as 'insertMany' but discarding result.
@@ -108,7 +112,7 @@ insertMany_ ss = insertMany ss >> return ()
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values. Unlike 'insertMany', this function keeps
 -- inserting remaining documents even if an error occurs.
-insertAll :: (MonadIO m, Structured a) => [a] -> Action m [Value]
+insertAll :: (MonadIO m, Structured a) => [a] -> Action m [ObjectId]
 insertAll = insertManyOrAll (M.insertAll)
 
 -- | Same as 'insertAll' but discarding result.
@@ -118,7 +122,7 @@ insertAll_ ss = insertAll ss >> return ()
 -- | Helper function that carries out the hard work for 'insertMany'
 -- and 'insertAll'.
 insertManyOrAll :: (MonadIO m, Structured a) =>
-   (M.Collection -> [Document] -> Action m [Value]) -> [a] -> Action m [Value]
+   (M.Collection -> [Document] -> Action m [Value]) -> [a] -> Action m [ObjectId]
 insertManyOrAll insertFunc ss = do
   let docs  = map (\x -> (collection x, toBSON x)) ss
       gdocs = (groupBy (\(a,_) (b,_) -> a == b))
@@ -128,7 +132,7 @@ insertManyOrAll insertFunc ss = do
                   then return []
                   else insertFunc (fst . head $ ds) (map snd ds)
              )
-  return $ concat rdocs
+  return $ mapMaybe valueToObjId $ concat rdocs
 
 --
 -- Update
