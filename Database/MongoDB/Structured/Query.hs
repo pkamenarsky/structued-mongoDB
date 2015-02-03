@@ -70,12 +70,12 @@ import Database.MongoDB.Query (Action
                               , Username
                               , Password
                               , auth)
-import Database.MongoDB.Structured.Types
 import Data.Bson
 import qualified Data.Text as T
 import Data.Maybe (fromJust, catMaybes, mapMaybe)
 import Data.List (sortBy, groupBy)
 import Data.Functor
+import Data.Typeable
 import Data.Word
 import Control.Monad
 import Control.Monad.IO.Class
@@ -91,40 +91,51 @@ valueToObjId :: Value -> Maybe ObjectId
 valueToObjId (ObjId oid) = Just oid
 valueToObjId _           = Nothing
 
+collection :: Typeable a => a -> T.Text
+collection x = T.pack $ tyConModule tr ++ tyConName tr
+  where
+    tr = typeRepTyCon $ typeOf x
+
+val' :: Val a => a -> [Field]
+val' = undefined
+
+cast'' :: Val a => [Field] -> Maybe a
+cast'' = undefined
+
 -- | Inserts document to its corresponding collection and return
 -- the \"_id\" value.
-insert :: (MonadIO m, Structured a) => a -> Action m (Maybe ObjectId)
-insert x = liftM valueToObjId $ M.insert (collection x) (toBSON x)
+insert :: (MonadIO m, Typeable a, Val a) => a -> Action m (Maybe ObjectId)
+insert x = liftM valueToObjId $ M.insert (collection x) (val' x)
 
 -- | Same as 'insert' but discarding result.
-insert_ :: (MonadIO m, Structured a) => a -> Action m ()
+insert_ :: (MonadIO m, Typeable a, Val a) => a -> Action m ()
 insert_ x = insert x >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values.
-insertMany :: (MonadIO m, Structured a) => [a] -> Action m [ObjectId]
+insertMany :: (MonadIO m, Typeable a, Val a) => [a] -> Action m [ObjectId]
 insertMany = insertManyOrAll (M.insertMany)
 
 -- | Same as 'insertMany' but discarding result.
-insertMany_ :: (MonadIO m, Structured a) => [a] -> Action m ()
+insertMany_ :: (MonadIO m, Typeable a, Val a) => [a] -> Action m ()
 insertMany_ ss = insertMany ss >> return ()
 
 -- | Inserts documents to their corresponding collection and return
 -- their \"_id\" values. Unlike 'insertMany', this function keeps
 -- inserting remaining documents even if an error occurs.
-insertAll :: (MonadIO m, Structured a) => [a] -> Action m [ObjectId]
+insertAll :: (MonadIO m, Typeable a, Val a) => [a] -> Action m [ObjectId]
 insertAll = insertManyOrAll (M.insertAll)
 
 -- | Same as 'insertAll' but discarding result.
-insertAll_ :: (MonadIO m, Structured a) => [a] -> Action m ()
+insertAll_ :: (MonadIO m, Typeable a, Val a) => [a] -> Action m ()
 insertAll_ ss = insertAll ss >> return ()
 
 -- | Helper function that carries out the hard work for 'insertMany'
 -- and 'insertAll'.
-insertManyOrAll :: (MonadIO m, Structured a) =>
+insertManyOrAll :: (MonadIO m, Typeable a, Val a) =>
    (M.Collection -> [Document] -> Action m [Value]) -> [a] -> Action m [ObjectId]
 insertManyOrAll insertFunc ss = do
-  let docs  = map (\x -> (collection x, toBSON x)) ss
+  let docs  = map (\x -> (collection x, val' x)) ss
       gdocs = (groupBy (\(a,_) (b,_) -> a == b))
               . (sortBy (\(a,_) (b,_) -> compare a b)) $ docs
   rdocs <- (forM gdocs $ \ds ->
@@ -140,8 +151,8 @@ insertManyOrAll insertFunc ss = do
 
 -- | Save document to collection. If the 'SObjId' field is set then
 -- the document is updated, otherwise we perform an insert.
-save :: (MonadIO m, Structured a) => a -> Action m ()
-save x = M.save (collection x) (toBSON x)
+save :: (MonadIO m, Typeable a, Val a) => a -> Action m ()
+save x = M.save (collection x) (val' x)
 
 
 --
@@ -167,17 +178,17 @@ find :: (Functor m, MonadIO m, MonadBaseControl IO m)
 find q = StructuredCursor <$> (M.find . unStructuredQuery $ q)
 
 -- | Find documents satisfying query
-findOne :: (MonadIO m, Structured a)
+findOne :: (MonadIO m, Typeable a, Val a)
      => StructuredQuery a -> Action m (Maybe a)
 findOne q = do 
   res <- M.findOne . unStructuredQuery $ q
-  return $ res >>= fromBSON
+  return $ res >>= cast''
 
 -- | Same as 'findOne' but throws 'DocNotFound' if none match. Error
 -- is thrown if the document cannot e transformed.
-fetch :: (MonadIO m, Functor m, Structured a)
+fetch :: (MonadIO m, Functor m, Typeable a, Val a)
      => StructuredQuery a -> Action m a
-fetch q = (fromJust . fromBSON) <$> (M.fetch . unStructuredQuery $ q)
+fetch q = (fromJust . cast'') <$> (M.fetch . unStructuredQuery $ q)
 
 -- | Count number of documents satisfying query.
 count :: (MonadIO m) => StructuredQuery a -> Action m Int
@@ -192,45 +203,45 @@ count = M.count . unStructuredQuery
 newtype StructuredCursor a = StructuredCursor { unStructuredCursor :: M.Cursor }
 
 -- | Return next batch of structured documents.
-nextBatch :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
+nextBatch :: (Typeable a, Val a, Functor m, MonadIO m, MonadBaseControl IO m)
           => StructuredCursor a -> Action m [Maybe a]
-nextBatch c = (map fromBSON) <$> M.nextBatch (unStructuredCursor c)
+nextBatch c = (map cast'') <$> M.nextBatch (unStructuredCursor c)
 
 -- | Return next batch of structured documents.
-nextBatch' :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
+nextBatch' :: (Typeable a, Val a, Functor m, MonadIO m, MonadBaseControl IO m)
           => StructuredCursor a -> Action m [a]
-nextBatch' c = catMaybes <$> (map fromBSON) <$> M.nextBatch (unStructuredCursor c)
+nextBatch' c = catMaybes <$> (map cast'') <$> M.nextBatch (unStructuredCursor c)
 
 -- | Return next structured document. If failed return 'Left',
 -- otherwise 'Right' of the deserialized result.
-next :: (Structured a, MonadIO m, MonadBaseControl IO m)
+next :: (Typeable a, Val a, MonadIO m, MonadBaseControl IO m)
      => StructuredCursor a -> Action m (Either () (Maybe a))
 next c = do
     res <- M.next (unStructuredCursor c)
     case res of
       Nothing -> return (Left ())
-      Just r  -> return (Right $ fromBSON r)
+      Just r  -> return (Right $ cast'' r)
 
 -- | Return up to next @N@ documents.
-nextN :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
+nextN :: (Typeable a, Val a, Functor m, MonadIO m, MonadBaseControl IO m)
       => Int -> StructuredCursor a -> Action m [Maybe a]
-nextN n c = (map fromBSON) <$> M.nextN n (unStructuredCursor c)
+nextN n c = (map cast'') <$> M.nextN n (unStructuredCursor c)
 
 -- | Return up to next @N@ valid documents.
-nextN' :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m)
+nextN' :: (Typeable a, Val a, Functor m, MonadIO m, MonadBaseControl IO m)
       => Int -> StructuredCursor a -> Action m [a]
-nextN' n c = catMaybes <$> (map fromBSON) <$> M.nextN n (unStructuredCursor c)
+nextN' n c = catMaybes <$> (map cast'') <$> M.nextN n (unStructuredCursor c)
 
 
 -- | Return the remaining documents in query result.
-rest :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m) 
+rest :: (Typeable a, Val a, Functor m, MonadIO m, MonadBaseControl IO m) 
      => StructuredCursor a -> Action m [Maybe a]
-rest c = (map fromBSON) <$> M.rest (unStructuredCursor c)
+rest c = (map cast'') <$> M.rest (unStructuredCursor c)
 
 -- | Return the remaining valid documents in query result.
-rest' :: (Structured a, Functor m, MonadIO m, MonadBaseControl IO m) 
+rest' :: (Typeable a, Val a, Functor m, MonadIO m, MonadBaseControl IO m) 
      => StructuredCursor a -> Action m [a]
-rest' c = catMaybes <$> (map fromBSON) <$> M.rest (unStructuredCursor c)
+rest' c = catMaybes <$> (map cast'') <$> M.rest (unStructuredCursor c)
 
 -- | Close the cursor.
 closeCursor :: (MonadIO m, MonadBaseControl IO m) => StructuredCursor a -> Action m ()
@@ -270,7 +281,7 @@ data StructuredQuery a = StructuredQuery
 -- | Analog to @mongoDB@'s @Select@ class
 class StructuredSelect aQorS where
   -- | Create a selection or query from an expression
-  select :: Structured a => QueryExp a -> aQorS a
+  select :: (Typeable a, Val a) => QueryExp a -> aQorS a
 
 instance StructuredSelect StructuredSelection where
   select = StructuredSelection . expToSelection
@@ -322,7 +333,7 @@ infixr  3 .&&
 infixr  2 .||
 
 -- | Combinator for @==@
-(.*) :: (Structured a) => QueryExp a
+(.*) :: (Typeable a, Val a) => QueryExp a
 (.*) = StarExp
 
 -- | Combinator for @==@
@@ -362,7 +373,7 @@ not_ :: QueryExp a -> QueryExp a
 not_ = NotExp
 
 -- | Convert a query expression to a 'Selector'.
-expToSelector :: Structured a => QueryExp a -> M.Selector
+expToSelector :: (Typeable a, Val a) => QueryExp a -> M.Selector
 expToSelector (StarExp)        = [ ]
 expToSelector (EqExp l v)      = [ l := v ]
 expToSelector (LBinExp op l v) = [ l =: [ op := v ]]
@@ -373,10 +384,10 @@ expToSelector (OrExp e1 e2)    = [ (T.pack "$or") =: [expToSelector e1
 expToSelector (NotExp e)       = [ (T.pack "$not") =: expToSelector e]
 
 -- | Convert query expression to 'Selection'.
-expToSelection :: Structured a => QueryExp a -> M.Selection
+expToSelection :: (Typeable a, Val a) => QueryExp a -> M.Selection
 expToSelection e = M.Select { M.selector = (expToSelector e)
                             , M.coll = (collection . c $ e) }
-  where c :: Structured a => QueryExp a -> a
+  where c :: (Typeable a, Val a) => QueryExp a -> a
         c _ = undefined
 
 -- | An ordering expression
